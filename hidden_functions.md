@@ -38,6 +38,7 @@ Press `Ctrl + S` to toggle **Spectator Mode**. This mode removes all climbing co
 - **Arrow Keys (`Up / Down / Left / Right`)**: Move in the corresponding directions  
 - **`+ / -`**: Zoom in / out  
 - All other key inputs are ignored for movement  
+- Cannot increase / decrease time warp speed in this mode
 
 ### Behavior Notes
 - Player collision and climbing logic are bypassed

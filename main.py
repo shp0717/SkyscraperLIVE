@@ -5,12 +5,12 @@ import pathlib
 import interference
 import numpy as np
 import subprocess
+from PIL import Image, PngImagePlugin
 
 
 root = pathlib.Path(__file__).parent.resolve()
 pygame.init()
 screen = pygame.display.set_mode((800, 600))
-pygame.display.set_caption("Skyscraper LIVE")
 pygame.display.set_icon(pygame.image.load(root / "icon.png"))
 clock = pygame.time.Clock()
 running = True
@@ -38,6 +38,8 @@ hand_reach = 40
 timewarp = 1.0
 allow_timewarp = False
 video_path = root / "skyscraper-live.mp4"
+version = (root / "version.txt").read_text().splitlines()[0]
+print(f"Skyscraper LIVE Version {version}")
 print(f"Saving video to: {video_path}")
 
 
@@ -75,6 +77,12 @@ def frame_from_pygame_screen(screen) -> np.ndarray:
 def save_frame():
     frame = frame_from_pygame_screen(screen)
     ffmpeg_process.stdin.write(frame.tobytes())
+
+
+def check_die():
+    if (x_speed**2 + y_speed**2) ** 0.5 >= 1800:
+        return True
+    return False
 
 
 def draw_object(points):
@@ -128,15 +136,19 @@ def touching_ground():
 
 
 def can_jump():
-    global player_radius
+    global player_radius, y
     raw_radius = player_radius
+    raw_y = y
+    y += 1
     player_radius -= 1
     for _ in range(21):
         player_radius += 1
+        y -= 1
         touch = touching_ground()
         if touch:
             break
     player_radius = raw_radius
+    y = raw_y
     return touch
 
 
@@ -156,19 +168,14 @@ def jump():
 
 
 def holding_skyscraper():
-    global y, player_radius
-    raw_y = y
+    global player_radius
     raw_radius = player_radius
-    y -= 1
     player_radius -= 1
     for _ in range(hand_reach + 1):
-        y += 1
         player_radius += 1
         if touching_skyscraper():
-            y = raw_y
             player_radius = raw_radius
             return True
-    y = raw_y
     player_radius = raw_radius
     return False
 
@@ -283,19 +290,19 @@ def move_y(dy):
     for _ in range(int(abs(dy))):
         y += ddy
         if y <= 50:
-            if (x_speed**2 + y_speed**2) ** 0.5 >= 1800:
+            if check_die():
                 running = False
                 return
         if touching_skyscraper():
             y -= ddy
-            if (x_speed**2 + y_speed**2) ** 0.5 >= 1800:
+            if check_die():
                 running = False
             y_speed = 0
             return
     y += dy - int(dy)
     if touching_skyscraper():
         y -= dy - int(dy)
-        if (x_speed**2 + y_speed**2) ** 0.5 >= 1800:
+        if check_die():
             running = False
         y_speed = 0
 
@@ -306,7 +313,12 @@ def timer():
         started = True
     if started and int(y) == 50800 and abs(x) < 20:
         started = False
-        pygame.image.save(screen, root / "honnald_selfie.png")
+        pygame.image.save(screen, root / "honnold_selfie.png")
+        img = Image.open(root / "honnold_selfie.png")
+        imginfo = PngImagePlugin.PngInfo()
+        imginfo.add_text("EXIF::CAMERA", f"USINGTIMESECONDS::{int(time)} AUTHOR::ALEXHONNOLD VERSION::{version} FILENAMETYPOAT::26292 AGREED::TRUE AGREEDBY::JIAYONGJIE")
+        img.save(root / "honnold_selfie.png", pnginfo=imginfo)
+        print(f"Finished in {timestamp(time)}! Screenshot saved to honnold_selfie.png")
     if not started:
         return
     time += dt
@@ -360,7 +372,7 @@ def draw():
     screen.blit(helper_text, (size[0] // 2 - helper_text.get_width() // 2, size[1] - 10 - helper_text.get_height()))
     screen.blit(strength_text, (size[0] - 10 - strength_text.get_width(), 10))
     floor = max(min(int(y // 450) + 1, 101), 1)
-    pygame.display.set_caption(f"Skyscraper LIVE - {floor}F - {int(y / 508)}% Completed - On {now_pos()} - Time {timestamp(time)}")
+    pygame.display.set_caption(f"Skyscraper LIVE - {floor}F - {int(y / 508)}% Completed - On {now_pos()}")
     save_frame()
 
 
