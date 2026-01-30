@@ -3,7 +3,8 @@ import sys
 import skyscraper
 import pathlib
 import interference
-from PIL import Image
+import numpy as np
+import subprocess
 
 
 root = pathlib.Path(__file__).parent.resolve()
@@ -28,7 +29,6 @@ skyscraper_polygon = skyscraper.taipei_101()
 time = 0.0
 started = False
 font = pygame.font.Font(str(root / "Ubuntu.ttf"), 24)
-live: list[Image.Image] = []
 spectator_mode = False
 key_move = True
 physical_strength = 100.0
@@ -37,16 +37,44 @@ last_jump_time = pygame.time.get_ticks()
 hand_reach = 40
 timewarp = 1.0
 allow_timewarp = False
+video_path = root / "skyscraper-live.mp4"
+print(f"Saving video to: {video_path}")
 
 
-def surface_to_image(surface: pygame.Surface) -> Image.Image:
-    data = pygame.image.tobytes(surface, "RGBA")
-    size = surface.get_size()
-    return Image.frombytes("RGBA", size, data)
+def start_ffmpeg(out_path: str):
+    w = screen.get_width()
+    h = screen.get_height()
+    fps = 48
+    # fmt: off
+    cmd = [
+        "ffmpeg",
+        "-y",                          # 覆蓋輸出
+        "-f", "rawvideo",              # 輸入是 raw frames
+        "-vcodec", "rawvideo",
+        "-pix_fmt", "rgb24",           # 我們餵給它 RGB
+        "-s", f"{w}x{h}",              # 影像尺寸
+        "-r", str(fps),                # 輸入 fps（很重要）
+        "-i", "-",                     # 從 stdin 讀
+        "-an",                         # 不錄音
+        "-vcodec", "libx264",
+        "-pix_fmt", "yuv420p",         # 兼容性最好
+        "-preset", "ultrafast",        # 越快壓縮越爛但省 CPU
+        "-crf", "23",                  # 品質：數字越小越清晰/檔越大
+        out_path
+    ]
+    return subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
-def frame():
-    live.append(surface_to_image(screen))
+def frame_from_pygame_screen(screen) -> np.ndarray:
+    # pygame.surfarray.array3d -> (W, H, 3) 要轉成 (H, W, 3)
+    frame = pygame.surfarray.array3d(screen)
+    frame = np.transpose(frame, (1, 0, 2))  # -> (H, W, 3)
+    return frame
+
+
+def save_frame():
+    frame = frame_from_pygame_screen(screen)
+    ffmpeg_process.stdin.write(frame.tobytes())
 
 
 def draw_object(points):
@@ -333,9 +361,10 @@ def draw():
     screen.blit(strength_text, (size[0] - 10 - strength_text.get_width(), 10))
     floor = max(min(int(y // 450) + 1, 101), 1)
     pygame.display.set_caption(f"Skyscraper LIVE - {floor}F - {int(y / 508)}% Completed - On {now_pos()} - Time {timestamp(time)}")
-    frame()
+    save_frame()
 
 
+ffmpeg_process = start_ffmpeg(str(video_path))
 while running:
     dt = clock.tick(48) / 1000.0 * timewarp
     for event in pygame.event.get():
@@ -357,6 +386,5 @@ while running:
     pygame.display.flip()
 
 
-live[0].save(root / "skyscraper_live.webp", save_all=True, append_images=live[1:], duration=1 / 48, loop=0, lossless=True)
 pygame.quit()
 sys.exit()
