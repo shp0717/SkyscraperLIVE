@@ -19,6 +19,7 @@ clock = pygame.time.Clock()
 running = True
 x = -4200
 y = 0
+player_radius = 50
 x_speed = 0
 y_speed = 0
 gravity = 980
@@ -26,7 +27,6 @@ jump_strength = 314
 skyscraper_color = (100, 100, 255)
 background_color = (135, 206, 235)
 player_color = (255, 0, 0)
-player_radius = 50
 scale = 0.25
 skyscraper_polygon = skyscraper.taipei_101_2()
 time = 0.0
@@ -42,7 +42,7 @@ timewarp = 1.0
 allow_timewarp = False
 video_path = root / "skyscraper-live.mp4"
 version = (root / "version.txt").read_text().splitlines()[0]
-frames: deque[np.ndarray] = deque(maxlen=48 * 10)
+frames: deque[np.ndarray] = deque(maxlen=48 * 10)  # 10 seconds buffer
 print(f"Skyscraper LIVE Version {version}")
 print(f"Saving video to: {video_path}")
 
@@ -54,27 +54,26 @@ def start_ffmpeg():
     # fmt: off
     cmd = [
         "ffmpeg",
-        "-y",                          # 覆蓋輸出
-        "-f", "rawvideo",              # 輸入是 raw frames
+        "-y",                          # Replace output file if exists
+        "-f", "rawvideo",              # input format
         "-vcodec", "rawvideo",
-        "-pix_fmt", "rgb24",           # 我們餵給它 RGB
-        "-s", f"{w}x{h}",              # 影像尺寸
-        "-r", str(fps),                # 輸入 fps（很重要）
-        "-i", "-",                     # 從 stdin 讀
-        "-an",                         # 不錄音
+        "-pix_fmt", "rgb24",           # RGB24 pixel format
+        "-s", f"{w}x{h}",              # size of one frame
+        "-r", str(fps),                # frames per second
+        "-i", "-",                     # input comes from a pipe
+        "-an",                         # no audio
         "-vcodec", "libx264",
-        "-pix_fmt", "yuv420p",         # 兼容性最好
-        "-preset", "ultrafast",        # 省 CPU
-        "-crf", "23",                  # 品質
-        str(video_path)                # 輸出檔案
+        "-pix_fmt", "yuv420p",         # output pixel format
+        "-preset", "ultrafast",        # encoding speed
+        "-crf", "23",                  # quality
+        str(video_path)                # output file
     ]
     return subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
 def frame_from_pygame_screen(screen) -> np.ndarray:
-    # pygame.surfarray.array3d -> (W, H, 3) 要轉成 (H, W, 3)
     frame = pygame.surfarray.array3d(screen)
-    frame = np.transpose(frame, (1, 0, 2))  # -> (H, W, 3)
+    frame = np.transpose(frame, (1, 0, 2))
     return frame
 
 
@@ -87,7 +86,8 @@ def save_frame():
 
 
 def check_die():
-    return (x_speed**2 + y_speed**2) ** 0.5 >= 1400
+    # return (x_speed**2 + y_speed**2) ** 0.5 >= 1400
+    return drop_floors() >= 3
 
 
 def unsafe(return_if_die=False):
@@ -118,7 +118,30 @@ def collide(player_pos, points):
     return False
 
 
-def line_circle_distance(p1, p2, center, radius):
+def closest_point_to_skyscraper():
+    player_center = (x, y + player_radius)
+    closest_point = None
+    min_dist_sq = float("inf")
+    for poly in skyscraper_polygon:
+        for i in range(len(poly)):
+            p1 = poly[i]
+            p2 = poly[(i + 1) % len(poly)]
+            point = closest_point_on_line(p1, p2, player_center)
+            dist_sq = (point[0] - player_center[0]) ** 2 + (point[1] - player_center[1]) ** 2
+            if dist_sq < min_dist_sq:
+                min_dist_sq = dist_sq
+                closest_point = point
+    return closest_point
+
+
+def distance_to_skyscraper():
+    closest_point = closest_point_to_skyscraper()
+    dist_sq = (closest_point[0] - x) ** 2 + (closest_point[1] - (y + player_radius)) ** 2
+    dist = (dist_sq)**0.5 - player_radius
+    return max(0, dist)
+
+
+def closest_point_on_line(p1, p2, center):
     # Vector from p1 to p2
     line_vec = (p2[0] - p1[0], p2[1] - p1[1])
     # Vector from p1 to center
@@ -127,16 +150,21 @@ def line_circle_distance(p1, p2, center, radius):
     line_len_sq = line_vec[0] ** 2 + line_vec[1] ** 2
     t = max(0, min(1, (p1_to_center[0] * line_vec[0] + p1_to_center[1] * line_vec[1]) / line_len_sq))
     closest_point = (p1[0] + t * line_vec[0], p1[1] + t * line_vec[1])
-    # Distance from closest point to center
+    return closest_point
+
+
+def line_circle_distance(p1, p2, center, radius):
+    closest_point = closest_point_on_line(p1, p2, center)
     dist_sq = (closest_point[0] - center[0]) ** 2 + (closest_point[1] - center[1]) ** 2
     return max(0, dist_sq**0.5 - radius)
 
 
 def touching_skyscraper():
-    for poly in skyscraper_polygon:
-        if collide((x, y + player_radius), poly):
-            return True
-    return False
+    # for poly in skyscraper_polygon:
+    #     if collide((x, y + player_radius), poly):
+    #         return True
+    # return False
+    return distance_to_skyscraper() == 0
 
 
 def touching_ground():
@@ -147,21 +175,25 @@ def touching_ground():
 
 @unsafe(return_if_die=False)
 def can_jump():
-    global player_radius, y
-    raw_radius = player_radius
-    raw_y = y
-    y += 1
-    player_radius -= 1
-    touch = False
-    for _ in range(21):
-        player_radius += 1
-        y -= 1
-        touch = touching_ground()
-        if touch:
-            break
-    player_radius = raw_radius
-    y = raw_y
-    return touch
+    # global player_radius, y
+    # raw_radius = player_radius
+    # raw_y = y
+    # y += 1
+    # player_radius -= 1
+    # touch = False
+    # for _ in range(21):
+    #     player_radius += 1
+    #     y -= 1
+    #     touch = touching_ground()
+    #     if touch:
+    #         break
+    # player_radius = raw_radius
+    # y = raw_y
+    # return touch
+    if y <= 0:
+        return True
+    distance = distance_to_skyscraper()
+    return distance <= 20
 
 
 def jump():
@@ -181,16 +213,18 @@ def jump():
 
 @unsafe(return_if_die=False)
 def holding_skyscraper():
-    global player_radius
-    raw_radius = player_radius
-    player_radius -= 1
-    for _ in range(hand_reach + 1):
-        player_radius += 1
-        if touching_skyscraper():
-            player_radius = raw_radius
-            return True
-    player_radius = raw_radius
-    return False
+    # global player_radius
+    # raw_radius = player_radius
+    # player_radius -= 1
+    # for _ in range(hand_reach + 1):
+    #     player_radius += 1
+    #     if touching_skyscraper():
+    #         player_radius = raw_radius
+    #         return True
+    # player_radius = raw_radius
+    # return False
+    distance = distance_to_skyscraper()
+    return distance <= hand_reach
 
 
 def move():
@@ -352,6 +386,10 @@ def now_pos():
     if y <= 47700:
         return "Damper"
     return "Lightning Rod"
+
+
+def drop_floors():
+    return y_speed ** 2 / 2 / gravity // 450
 
 
 def draw():

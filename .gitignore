@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+.DS_Store
+.vscode/
+__MACOSX/
+honnold_selfie.png
+skyscraper-live.mp4
+*.spec
+build/
+dist/
