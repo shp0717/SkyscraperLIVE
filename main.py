@@ -1,11 +1,14 @@
-import pygame
 import sys
-import skyscraper
+import pygame
 import pathlib
-import interference
-import numpy as np
+import skyscraper
 import subprocess
-from PIL import Image, PngImagePlugin
+import numpy as np
+import interference
+from PIL import Image
+from functools import wraps
+from collections import deque
+from PIL import PngImagePlugin
 
 
 root = pathlib.Path(__file__).parent.resolve()
@@ -25,7 +28,7 @@ background_color = (135, 206, 235)
 player_color = (255, 0, 0)
 player_radius = 50
 scale = 0.25
-skyscraper_polygon = skyscraper.taipei_101()
+skyscraper_polygon = skyscraper.taipei_101_2()
 time = 0.0
 started = False
 font = pygame.font.Font(str(root / "Ubuntu.ttf"), 24)
@@ -39,11 +42,12 @@ timewarp = 1.0
 allow_timewarp = False
 video_path = root / "skyscraper-live.mp4"
 version = (root / "version.txt").read_text().splitlines()[0]
+frames: deque[np.ndarray] = deque(maxlen=48 * 10)
 print(f"Skyscraper LIVE Version {version}")
 print(f"Saving video to: {video_path}")
 
 
-def start_ffmpeg(out_path: str):
+def start_ffmpeg():
     w = screen.get_width()
     h = screen.get_height()
     fps = 48
@@ -60,9 +64,9 @@ def start_ffmpeg(out_path: str):
         "-an",                         # 不錄音
         "-vcodec", "libx264",
         "-pix_fmt", "yuv420p",         # 兼容性最好
-        "-preset", "ultrafast",        # 越快壓縮越爛但省 CPU
-        "-crf", "23",                  # 品質：數字越小越清晰/檔越大
-        out_path
+        "-preset", "ultrafast",        # 省 CPU
+        "-crf", "23",                  # 品質
+        str(video_path)                # 輸出檔案
     ]
     return subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
@@ -76,13 +80,27 @@ def frame_from_pygame_screen(screen) -> np.ndarray:
 
 def save_frame():
     frame = frame_from_pygame_screen(screen)
-    ffmpeg_process.stdin.write(frame.tobytes())
+    frames.append(frame)
+    if len(frames) == frames.maxlen:
+        oldest_frame = frames.popleft()
+        ffmpeg_process.stdin.write(oldest_frame.tobytes())
 
 
 def check_die():
-    if (x_speed**2 + y_speed**2) ** 0.5 >= 1800:
-        return True
-    return False
+    return (x_speed**2 + y_speed**2) ** 0.5 >= 1400
+
+
+def unsafe(return_if_die=False):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if check_die():
+                return return_if_die
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def draw_object(points):
@@ -95,12 +113,12 @@ def collide(player_pos, points):
     for i in range(len(points)):
         p1 = points[i]
         p2 = points[(i + 1) % len(points)]
-        if line_circle_collision(p1, p2, player_pos, player_radius):
+        if line_circle_distance(p1, p2, player_pos, player_radius) == 0:
             return True
     return False
 
 
-def line_circle_collision(p1, p2, center, radius):
+def line_circle_distance(p1, p2, center, radius):
     # Vector from p1 to p2
     line_vec = (p2[0] - p1[0], p2[1] - p1[1])
     # Vector from p1 to center
@@ -111,7 +129,7 @@ def line_circle_collision(p1, p2, center, radius):
     closest_point = (p1[0] + t * line_vec[0], p1[1] + t * line_vec[1])
     # Distance from closest point to center
     dist_sq = (closest_point[0] - center[0]) ** 2 + (closest_point[1] - center[1]) ** 2
-    return dist_sq <= radius**2
+    return max(0, dist_sq**0.5 - radius)
 
 
 def touching_skyscraper():
@@ -124,23 +142,17 @@ def touching_skyscraper():
 def touching_ground():
     if y <= 0:
         return True
-    # global y
-    # touch_a = touching_skyscraper()
-    # y += 1
-    # touch_b = touching_skyscraper()
-    # y -= 2
-    # touch_c = touching_skyscraper()
-    # y += 1
-    # return touch_a and (not touch_b or not touch_c)
     return touching_skyscraper()
 
 
+@unsafe(return_if_die=False)
 def can_jump():
     global player_radius, y
     raw_radius = player_radius
     raw_y = y
     y += 1
     player_radius -= 1
+    touch = False
     for _ in range(21):
         player_radius += 1
         y -= 1
@@ -167,6 +179,7 @@ def jump():
                 y_speed = max(jump_strength * (jump_delay / 500.0), 128, y_speed)
 
 
+@unsafe(return_if_die=False)
 def holding_skyscraper():
     global player_radius
     raw_radius = player_radius
@@ -238,13 +251,6 @@ def move():
         scale /= 2**dt
     if keys[pygame.K_HOME]:
         scale = 0.25
-    if allow_timewarp:
-        if keys[pygame.K_COMMA]:
-            timewarp /= 2**dt
-        if keys[pygame.K_PERIOD]:
-            timewarp *= 2**dt
-        if keys[pygame.K_SLASH]:
-            timewarp = 1.0
     move_x(x_speed * dt)
     move_y(y_speed * dt)
     timer()
@@ -311,7 +317,7 @@ def timer():
     global time, started
     if not started and y > 0 and time == 0.0:
         started = True
-    if started and int(y) == 50800 and abs(x) < 20:
+    if started and int(y) == 50800 and abs(x) < 5:
         started = False
         pygame.image.save(screen, root / "honnold_selfie.png")
         img = Image.open(root / "honnold_selfie.png")
@@ -354,7 +360,7 @@ def draw():
     size = screen.get_size()
     for poly in skyscraper_polygon:
         draw_object(poly)
-    namefont = pygame.font.Font(str(root / "Ubuntu.ttf"), max(int(96 * scale + 0.5), 5))
+    namefont = pygame.font.Font(str(root / "Ubuntu.ttf"), max(int(96 * scale + 0.5), 15))
     name = namefont.render("Alex Honnold", True, (0, 0, 0))
     pygame.draw.circle(screen, player_color, (size[0] // 2, size[1] // 2 - int(player_radius * scale)), int(player_radius * scale))
     screen.blit(name, (size[0] // 2 - name.get_width() // 2, size[1] // 2 - int(player_radius * scale) * 2 - 120 * scale - name.get_height()))
@@ -372,11 +378,11 @@ def draw():
     screen.blit(helper_text, (size[0] // 2 - helper_text.get_width() // 2, size[1] - 10 - helper_text.get_height()))
     screen.blit(strength_text, (size[0] - 10 - strength_text.get_width(), 10))
     floor = max(min(int(y // 450) + 1, 101), 1)
-    pygame.display.set_caption(f"Skyscraper LIVE - {floor}F - {int(y / 508)}% Completed - On {now_pos()}")
+    pygame.display.set_caption(f"Skyscraper LIVE - {floor}F - {int(y / 508)}% Completed - On {now_pos()}{f' - {timewarp}x Speed' if allow_timewarp else ''}")
     save_frame()
 
 
-ffmpeg_process = start_ffmpeg(str(video_path))
+ffmpeg_process = start_ffmpeg()
 while running:
     dt = clock.tick(48) / 1000.0 * timewarp
     for event in pygame.event.get():
@@ -390,6 +396,12 @@ while running:
                     key_move = not key_move
                 if event.key == pygame.K_t:
                     allow_timewarp = not allow_timewarp
+            if event.key == pygame.K_COMMA and allow_timewarp:
+                timewarp /= 2
+            if event.key == pygame.K_PERIOD and allow_timewarp:
+                timewarp *= 2
+            if event.key == pygame.K_SLASH and allow_timewarp:
+                timewarp = 1.0
     if spectator_mode:
         move_simple()
     else:

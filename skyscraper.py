@@ -20,3 +20,26 @@ def taipei_101():
         damper,
         lightning_rod,
     ]
+
+
+def taipei_101_2():
+    shape = []
+    y = 0
+
+    def add_level(width_bottom, width_top, height):
+        nonlocal y
+        shape_index = int(len(shape) * 0.5)
+        shape.insert(shape_index, (-width_bottom // 2, y))
+        shape.insert(shape_index, (-width_top // 2, y + height))
+        shape.insert(shape_index, (width_top // 2, y + height))
+        shape.insert(shape_index, (width_bottom // 2, y))
+        y += height
+
+    add_level(8000, 5000, 10800)  # Bottom base
+    add_level(6000, 6000, 450)  # Plate
+    for _ in range(8):
+        add_level(5000, 7000, 3600)  # Knots
+    add_level(3000, 4000, 5400)  # Top spire
+    add_level(2000, 1400, 2250)  # Damper
+    add_level(400, 100, 3100)  # Lightning rod
+    return [shape]
