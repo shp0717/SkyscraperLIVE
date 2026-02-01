@@ -1,14 +1,19 @@
 import sys
+import math
 import pygame
 import pathlib
 import skyscraper
 import subprocess
 import numpy as np
 import interference
-from PIL import Image
 from functools import wraps
-from collections import deque
-from PIL import PngImagePlugin
+
+save_video = True
+save_screenshot = True
+if save_video:
+    from collections import deque
+if save_screenshot:
+    from PIL import Image, PngImagePlugin
 
 
 root = pathlib.Path(__file__).parent.resolve()
@@ -27,6 +32,7 @@ jump_strength = 314
 skyscraper_color = (100, 100, 255)
 background_color = (135, 206, 235)
 player_color = (255, 0, 0)
+ground_color = (34, 139, 34)
 scale = 0.25
 skyscraper_polygon = skyscraper.taipei_101_2()
 time = 0.0
@@ -36,7 +42,7 @@ spectator_mode = False
 key_move = True
 physical_strength = 100.0
 strength_consumed = False
-last_jump_time = pygame.time.get_ticks()
+last_jump_time = -1000
 hand_reach = 40
 timewarp = 1.0
 allow_timewarp = False
@@ -78,6 +84,8 @@ def frame_from_pygame_screen(screen) -> np.ndarray:
 
 
 def save_frame():
+    if not save_video:
+        return
     frame = frame_from_pygame_screen(screen)
     frames.append(frame)
     if len(frames) == frames.maxlen:
@@ -137,7 +145,7 @@ def closest_point_to_skyscraper():
 def distance_to_skyscraper():
     closest_point = closest_point_to_skyscraper()
     dist_sq = (closest_point[0] - x) ** 2 + (closest_point[1] - (y + player_radius)) ** 2
-    dist = (dist_sq)**0.5 - player_radius
+    dist = (dist_sq) ** 0.5 - player_radius
     return max(0, dist)
 
 
@@ -159,6 +167,15 @@ def line_circle_distance(p1, p2, center, radius):
     return max(0, dist_sq**0.5 - radius)
 
 
+def angle(point):
+    return math.atan2(point[1] - (y + player_radius), point[0] - x) % (2 * math.pi)
+
+
+def angle_to_skyscraper():
+    closest_point = closest_point_to_skyscraper()
+    return angle(closest_point)
+
+
 def touching_skyscraper():
     # for poly in skyscraper_polygon:
     #     if collide((x, y + player_radius), poly):
@@ -168,9 +185,7 @@ def touching_skyscraper():
 
 
 def touching_ground():
-    if y <= 0:
-        return True
-    return touching_skyscraper()
+    return y <= 0 or touching_skyscraper()
 
 
 @unsafe(return_if_die=False)
@@ -198,7 +213,7 @@ def can_jump():
 
 def jump():
     global y_speed, physical_strength, strength_consumed, last_jump_time
-    current_time = pygame.time.get_ticks()
+    current_time = time * 1000
     jump_delay = current_time - last_jump_time
     if can_jump():
         physical_strength -= 0.1 if jump_delay > 500 else jump_delay / 5000.0
@@ -237,8 +252,10 @@ def move():
     move_strength = 0.1
     if keys[pygame.K_LCTRL] or keys[pygame.K_RCTRL]:
         speed = 50
+        move_strength = 0.05
     if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
         speed = 30
+        move_strength = 0.03
     y_speed -= gravity * dt
     holding = bool(keys[pygame.K_DOWN])
     if holding and holding_skyscraper():
@@ -316,10 +333,11 @@ def move_x(dx):
         x += ddx
         if touching_skyscraper():
             x -= ddx
-            return
+            break
     x += dx - int(dx)
     if touching_skyscraper():
         x -= dx - int(dx)
+        x += math.cos(angle_to_skyscraper()) * distance_to_skyscraper()
 
 
 def move_y(dy):
@@ -337,8 +355,9 @@ def move_y(dy):
             y -= ddy
             if check_die():
                 running = False
+                return
             y_speed = 0
-            return
+            break
     y += dy - int(dy)
     if touching_skyscraper():
         y -= dy - int(dy)
@@ -353,12 +372,16 @@ def timer():
         started = True
     if started and int(y) == 50800 and abs(x) < 5:
         started = False
-        pygame.image.save(screen, root / "honnold_selfie.png")
-        img = Image.open(root / "honnold_selfie.png")
-        imginfo = PngImagePlugin.PngInfo()
-        imginfo.add_text("EXIF::CAMERA", f"USINGTIMESECONDS::{int(time)} AUTHOR::ALEXHONNOLD VERSION::{version} FILENAMETYPOAT::26292 AGREED::TRUE AGREEDBY::JIAYONGJIE")
-        img.save(root / "honnold_selfie.png", pnginfo=imginfo)
-        print(f"Finished in {timestamp(time)}! Screenshot saved to honnold_selfie.png")
+        if save_screenshot:
+            pygame.image.save(screen, root / "honnold_selfie.png")
+            img = Image.open(root / "honnold_selfie.png")
+            imginfo = PngImagePlugin.PngInfo()
+            imginfo.add_text(
+                "EXIF::CAMERA",
+                f"USINGTIMESECONDS::{int(time)} AUTHOR::ALEXHONNOLD VERSION::{version} FILENAMETYPOAT::26292 AGREED::TRUE AGREEDBY::JIAYONGJIE"
+            )
+            img.save(root / "honnold_selfie.png", pnginfo=imginfo)
+            print(f"Finished in {timestamp(time)}! Screenshot saved to honnold_selfie.png")
     if not started:
         return
     time += dt
@@ -389,7 +412,7 @@ def now_pos():
 
 
 def drop_floors():
-    return y_speed ** 2 / 2 / gravity // 450
+    return y_speed**2 / 2 / gravity // 450
 
 
 def draw():
@@ -402,6 +425,7 @@ def draw():
     name = namefont.render("Alex Honnold", True, (0, 0, 0))
     pygame.draw.circle(screen, player_color, (size[0] // 2, size[1] // 2 - int(player_radius * scale)), int(player_radius * scale))
     screen.blit(name, (size[0] // 2 - name.get_width() // 2, size[1] // 2 - int(player_radius * scale) * 2 - 120 * scale - name.get_height()))
+    pygame.draw.rect(screen, ground_color, (0, size[1] // 2 + int(y * scale), size[0], size[1] // 2 - int(y * scale)))
     current_frame = screen.copy()
 
     screen.fill(background_color)
