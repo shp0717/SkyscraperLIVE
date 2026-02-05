@@ -6,6 +6,7 @@ def strength(h, max_h, a=0.6, b=3.0):
 
 
 def strength2(h, max_h, a=0.6, b=3.0, w=None):
+    h = h % max_h
     if w is None:
         w = max_h / math.pi
     s = strength(h, max_h, a, b)

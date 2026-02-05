@@ -11,6 +11,7 @@ This document outlines several hidden features in **SkyscraperLIVE** that are pr
 
 ## 1. Time Warp Toggle
 
+> Developer Mode Feature
 Press `Ctrl + T` to toggle **Time Warp Mode**. When enabled, the simulation time progresses faster, allowing developers to quickly test long climbs or time-dependent mechanics.
 
 ### Controls
@@ -31,6 +32,7 @@ When enabled, the time increment per frame is multiplied by the `timewarp` facto
 
 ## 2. Spectator Mode
 
+> Developer Mode Feature
 Press `Ctrl + S` to toggle **Spectator Mode**. This mode removes all climbing constraints and allows free camera movement, making it useful for inspecting level geometry and building models.
 
 ### Controls
@@ -48,6 +50,35 @@ Press `Ctrl + S` to toggle **Spectator Mode**. This mode removes all climbing co
 ### Implementation
 In `main.py`, Spectator Mode is controlled by the `spectator_mode` boolean variable.  
 When enabled, the `move_simple()` function is used instead of the standard climbing logic (`move()`), allowing unrestricted movement.
+
+## 3. Developer Mode Activation
+
+Press `Ctrl + D` to toggle **Developer Mode**. This mode enables access to both Time Warp and Spectator Mode features.
+
+### Controls
+- **`Ctrl + D`**: Toggle Developer Mode
+
+### Behavior Notes
+- Enables access to hidden features
+- Should be used only by developers and testers
+- Not intended for end-users
+
+### Implementation
+In `main.py`, the `developer_mode` boolean variable controls access to Time Warp and Spectator Mode features.  
+When enabled, the relevant keybindings become active.
+
+## 4. Key Movement Toggle
+
+### Controls
+- **`Ctrl + M`**: Toggle Key Movement Mode
+- **`Mouse Left/Right Click`**: Move left / right (on mouse control mode)
+
+### Behavior Notes
+- Switches between keyboard and mouse control for movement
+- Useful for testing different input methods
+
+### Implementation
+In `main.py`, the `key_move` boolean variable determines whether keyboard or mouse input is used for movement control.
 
 ---
 

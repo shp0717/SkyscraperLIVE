@@ -7,11 +7,9 @@ import subprocess
 import numpy as np
 import interference
 from functools import wraps
+from collections import deque
 
-save_video = True
-save_screenshot = True
-if save_video:
-    from collections import deque
+save_video, save_screenshot = True, True
 if save_screenshot:
     from PIL import Image, PngImagePlugin
 
@@ -39,18 +37,24 @@ time = 0.0
 started = False
 font = pygame.font.Font(str(root / "Ubuntu.ttf"), 24)
 spectator_mode = False
+allow_timewarp = False
 key_move = True
+developer_mode = False
 physical_strength = 100.0
 strength_consumed = False
 last_jump_time = -1000
 hand_reach = 40
 timewarp = 1.0
-allow_timewarp = False
 video_path = root / "skyscraper-live.mp4"
 version = (root / "version.txt").read_text().splitlines()[0]
 frames: deque[np.ndarray] = deque(maxlen=48 * 10)  # 10 seconds buffer
+pygame.mouse.set_cursor(pygame.cursors.broken_x)
 print(f"Skyscraper LIVE Version {version}")
 print(f"Saving video to: {video_path}")
+
+
+def is_pygame_ce():
+    return hasattr(pygame, "get_sdl_version") and pygame.get_sdl_version()[0] >= 2
 
 
 def start_ffmpeg():
@@ -111,9 +115,15 @@ def unsafe(return_if_die=False):
     return decorator
 
 
-def draw_object(points):
+def draw_object(points, shake_offset=(0, 0)):
     size = screen.get_size()
-    rel_points = [(int((px - x) * scale + size[0] // 2), int((y - py) * scale + size[1] // 2)) for (px, py) in points]
+    rel_points = [
+        (
+            int((px - x) * scale + size[0] // 2 + shake_offset[0]),
+            int((y - py) * scale + size[1] // 2 + shake_offset[1]),
+        )
+        for (px, py) in points
+    ]
     pygame.draw.polygon(screen, skyscraper_color, rel_points)
 
 
@@ -376,10 +386,7 @@ def timer():
             pygame.image.save(screen, root / "honnold_selfie.png")
             img = Image.open(root / "honnold_selfie.png")
             imginfo = PngImagePlugin.PngInfo()
-            imginfo.add_text(
-                "EXIF::CAMERA",
-                f"USINGTIMESECONDS::{int(time)} AUTHOR::ALEXHONNOLD VERSION::{version} FILENAMETYPOAT::26292 AGREED::TRUE AGREEDBY::JIAYONGJIE"
-            )
+            imginfo.add_text("EXIF::CAMERA", f"USINGTIMESECONDS::{int(time)} AUTHOR::ALEXHONNOLD VERSION::{version} FILENAMETYPOAT::26292 AGREED::TRUE AGREEDBY::JIAYONGJIE")
             img.save(root / "honnold_selfie.png", pnginfo=imginfo)
             print(f"Finished in {timestamp(time)}! Screenshot saved to honnold_selfie.png")
     if not started:
@@ -419,18 +426,29 @@ def draw():
     screen.fill(background_color)
 
     size = screen.get_size()
+    shake = lambda: interference.shake(y, 50800, t=time) * scale * 3.14
+    shake_offset = shake(), shake()
     for poly in skyscraper_polygon:
-        draw_object(poly)
+        draw_object(poly, shake_offset=shake_offset)
     namefont = pygame.font.Font(str(root / "Ubuntu.ttf"), max(int(96 * scale + 0.5), 15))
     name = namefont.render("Alex Honnold", True, (0, 0, 0))
-    pygame.draw.circle(screen, player_color, (size[0] // 2, size[1] // 2 - int(player_radius * scale)), int(player_radius * scale))
-    screen.blit(name, (size[0] // 2 - name.get_width() // 2, size[1] // 2 - int(player_radius * scale) * 2 - 120 * scale - name.get_height()))
-    pygame.draw.rect(screen, ground_color, (0, size[1] // 2 + int(y * scale), size[0], size[1] // 2 - int(y * scale)))
-    current_frame = screen.copy()
-
-    screen.fill(background_color)
-    shake = lambda: interference.shake(y, 50800, t=time) * scale * 3.14
-    screen.blit(current_frame, (shake(), shake()))
+    pygame.draw.circle(
+        screen,
+        player_color,
+        (
+            size[0] // 2 + int(shake_offset[0]),
+            size[1] // 2 - int(player_radius * scale) + int(shake_offset[1]),
+        ),
+        int(player_radius * scale),
+    )
+    screen.blit(
+        name,
+        (
+            size[0] // 2 - name.get_width() // 2 + int(shake_offset[0]),
+            size[1] // 2 - int(player_radius * scale) * 2 - 50 * scale - name.get_height() + int(shake_offset[1]),
+        ),
+    )
+    pygame.draw.rect(screen, ground_color, (0, size[1] // 2 + int(y * scale) + int(shake_offset[1]), size[0], size[1] // 2 - int(y * scale) - int(shake_offset[1])))
 
     time_text = font.render(timestamp(time), True, (0, 0, 0))
     move_method = ["Mouse Buttons", "Arrow Keys"]
@@ -444,7 +462,8 @@ def draw():
     save_frame()
 
 
-ffmpeg_process = start_ffmpeg()
+if save_video:
+    ffmpeg_process = start_ffmpeg()
 while running:
     dt = clock.tick(48) / 1000.0 * timewarp
     for event in pygame.event.get():
@@ -452,18 +471,31 @@ while running:
             running = False
         if event.type == pygame.KEYDOWN:
             if event.mod & pygame.KMOD_CTRL:
-                if event.key == pygame.K_s:
-                    spectator_mode = not spectator_mode
                 if event.key == pygame.K_m:
                     key_move = not key_move
-                if event.key == pygame.K_t:
-                    allow_timewarp = not allow_timewarp
+                if event.key == pygame.K_d:
+                    developer_mode = not developer_mode
+                if developer_mode:
+                    if event.key == pygame.K_s:
+                        spectator_mode = not spectator_mode
+                        y_speed = 0
+                        pygame.mouse.get_rel()
+                        pygame.mouse.set_relative_mode(spectator_mode)
+                    if event.key == pygame.K_t:
+                        allow_timewarp = not allow_timewarp
             if event.key == pygame.K_COMMA and allow_timewarp:
                 timewarp /= 2
             if event.key == pygame.K_PERIOD and allow_timewarp:
                 timewarp *= 2
             if event.key == pygame.K_SLASH and allow_timewarp:
                 timewarp = 1.0
+        if spectator_mode:
+            if event.type == pygame.MOUSEMOTION:
+                mx, my = event.rel
+                x += -mx / scale
+                y += my / scale
+            if event.type == pygame.MOUSEWHEEL:
+                scale *= 1.1 ** event.y
     if spectator_mode:
         move_simple()
     else:

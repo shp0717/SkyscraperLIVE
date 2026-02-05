@@ -59,7 +59,7 @@ Now version: [Click here](version.txt)
 - D: Revision number of the day
 
 ## License
-This project is licensed under the M<span style="font-size:0">ade </span>I<span style="font-size:0">n </span>T<span style="font-size:0">aiwan</span> License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Inspiration
 This simulation is inspired by Alex Honnold's incredible free solo climb of Taipei 101, as featured in the Netflix live event "Skyscraper LIVE". The goal is to provide an engaging experience that captures the thrill and challenge of such a feat.
